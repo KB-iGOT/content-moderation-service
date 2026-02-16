@@ -1,37 +1,40 @@
 FROM python:3.12-slim
 
-# Install minimal dependencies (uv binary)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup --system appuser && adduser --system --ingroup appuser appuser
+# Create app directory first
+RUN mkdir -p /app
 
-# Copy project files
+# Create non-root user WITH home directory
+RUN addgroup --system appuser && \
+    adduser --system --ingroup appuser --home /app --shell /bin/sh appuser
+
+# Set proper HOME and cache
+ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
+
+# Copy dependency files
 COPY requirements.txt .
 COPY pyproject.toml* uv.lock* ./
 
-# Install dependencies using uv (as root)
+# Install dependencies (as root)
 RUN uv sync --frozen --no-cache
 
-# Copy source code
+# Copy source
 COPY src ./src
 COPY scripts ./scripts
 
-# Pre-download Hugging Face models (as root so cache is created)
-RUN uv run python scripts/download_models.py
+# Create cache directory
+RUN mkdir -p /app/.cache && \
+    chown -R appuser:appuser /app
 
-# Give ownership to appuser
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
+# Switch to non-root
 USER appuser
 
 EXPOSE 8000
 
-# Health check
 HEALTHCHECK CMD curl -f http://localhost:8000/health || exit 1
 
-# Run application   
 CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
